@@ -379,8 +379,8 @@
   .yt-loader-overlay {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: #000;
-    color: #fff;
+    background: #f1f1f1;
+    color: var(--text-main);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -397,6 +397,33 @@
     min-height: 400px;
     padding: 3rem;
     background: var(--bg-light);
+  }
+
+  .loader {
+    width: 60px;
+    aspect-ratio: 1;
+    display: grid;
+    border: 4px solid #0000;
+    border-radius: 50%;
+    border-right-color: var(--its-maroon-dark);
+    animation: l15 3s infinite linear;
+    margin-bottom: 2rem;
+  }
+  .loader::before,
+  .loader::after {    
+    content: "";
+    grid-area: 1/1;
+    margin: 2px;
+    border: inherit;
+    border-radius: 50%;
+    animation: l15 2s infinite;
+  }
+  .loader::after {
+    margin: 8px;
+    animation-duration: 3s;
+  }
+  @keyframes l15 { 
+    100% { transform: rotate(1turn); }
   }
 
   .mandala-loader {
@@ -1403,14 +1430,8 @@ function renderStreamViewerWith(s) {
             <div id="yt-player-container" class="video-wrapper">
               <div id="plyr-youtube-player" data-plyr-provider="youtube" data-plyr-embed-id="${videoId}"></div>
               <div id="yt-loader-overlay" class="yt-loader-overlay">
-                <svg class="mandala-loader" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg" style="width:50px; height:50px; margin-bottom:1rem; opacity:1;">
-                  <circle cx="40" cy="40" r="36" fill="none" stroke="#ad8e6b" stroke-width="2" opacity="0.8"/>
-                  <circle cx="40" cy="40" r="28" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-                  <circle cx="40" cy="40" r="20" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-                  <polygon points="40,6 46,30 70,30 51,46 58,70 40,55 22,70 29,46 10,30 34,30" fill="none" stroke="#ad8e6b" stroke-width="2" opacity="0.8"/>
-                  <circle cx="40" cy="40" r="5" fill="#ad8e6b"/>
-                </svg>
-                <div style="font-family:'Source Sans Pro', sans-serif; font-size:1.1rem; color:#e2e8f0; font-weight:600; letter-spacing:0.05em;">Wait! Live stream is loading......</div>
+                <div class="loader" style="margin-bottom:1.5rem;"></div>
+                <div style="font-family:'Source Sans Pro', sans-serif; font-size:1.1rem; color:var(--its-maroon-dark); font-weight:600; letter-spacing:0.05em;">Wait! Live stream is loading......</div>
               </div>
             </div>`;
           
@@ -1424,14 +1445,14 @@ function renderStreamViewerWith(s) {
               youtube: { rel: 0, iv_load_policy: 3, modestbranding: 1, controls: 0 }
             });
 
-            // Fade out the loading overlay after 4 seconds to hide YouTube branding during boot up
+            // Fade out the loading overlay after 7 seconds to hide YouTube branding during boot up
             setTimeout(() => {
               const overlay = document.getElementById('yt-loader-overlay');
               if (overlay) {
                 overlay.style.opacity = '0';
                 setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
               }
-            }, 4000);
+            }, 7000);
           }, 50);
         }
       } else {
