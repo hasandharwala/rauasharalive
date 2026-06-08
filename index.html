@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1241,14 +1241,12 @@ function renderStreamViewerWith(s) {
         const existing = body.querySelector('#yt-player-container');
         if (!existing || body.dataset.loadedId !== videoId) {
           body.dataset.loadedId = videoId;
-          const embedSrc = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
+          const embedSrc = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1`;
           body.innerHTML = `
-            <div id="yt-player-container" class="video-wrapper" style="position:relative;">
+            <div id="yt-player-container" class="video-wrapper">
               <iframe src="${embedSrc}" title="YouTube video player" frameborder="0"
                 allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture;web-share"
                 referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-              <div style="position:absolute;top:0;left:0;right:44px;height:56px;background:#000;z-index:2;pointer-events:none;"></div>
-              <div style="position:absolute;bottom:0;left:0;right:44px;height:50px;background:#000;z-index:2;pointer-events:none;"></div>
             </div>`;
         }
       } else {
