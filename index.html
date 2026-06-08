@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Live Stream Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
 <style>
@@ -786,6 +787,26 @@
 
   .btn-add:hover { background: var(--its-gold); color: #fff; }
 
+  /* ─── PLATFORM BUTTONS ─── */
+  .plat-btn {
+    background: #fff;
+    border: 1.5px solid var(--border-light);
+    border-radius: 8px;
+    padding: 0.55rem 1.1rem;
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    font-family: 'Source Sans Pro', sans-serif;
+  }
+  .plat-btn:hover { border-color: var(--its-gold); color: var(--its-gold); }
+  .plat-btn.plat-active {
+    background: var(--its-gold);
+    border-color: var(--its-gold);
+    color: #fff;
+  }
+
   /* ─── SCHEDULE EDITOR ─── */
   .schedule-editor {
     max-height: 320px;
@@ -1017,8 +1038,17 @@
     <div class="admin-card">
       <div class="admin-card-title">🔴 Stream Control</div>
 
-      <label style="font-size:0.75rem; color:var(--text-muted); letter-spacing:0.08em; text-transform:uppercase; display:block; margin-bottom:0.4rem;">YouTube Stream URL</label>
-      <input type="text" class="stream-url-input" id="admin-stream-url" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
+      <label style="font-size:0.75rem; color:var(--text-muted); letter-spacing:0.08em; text-transform:uppercase; display:block; margin-bottom:0.5rem;">Platform</label>
+      <div style="display:flex; gap:0.6rem; margin-bottom:1.2rem; flex-wrap:wrap;">
+        <button id="plat-youtube" class="plat-btn plat-active" onclick="setPlatform('youtube')">▶ YouTube</button>
+        <button id="plat-twitch" class="plat-btn" onclick="setPlatform('twitch')">🟣 Twitch</button>
+        <button id="plat-custom" class="plat-btn" onclick="setPlatform('custom')">🔗 Custom URL</button>
+      </div>
+
+      <div id="platform-hint" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.6rem;line-height:1.5;"></div>
+
+      <label style="font-size:0.75rem; color:var(--text-muted); letter-spacing:0.08em; text-transform:uppercase; display:block; margin-bottom:0.4rem;">Stream URL / Channel Name</label>
+      <input type="text" class="stream-url-input" id="admin-stream-url" placeholder="">
 
       <div class="toggle-row" style="margin-top:0.75rem;">
         <span class="toggle-label">Stream is LIVE</span>
@@ -1103,9 +1133,11 @@ function saveScheduleData(d) {
   localStorage.setItem('ashara_schedule', JSON.stringify(d));
 }
 
+const DEFAULT_STREAM_URL = 'https://www.youtube-nocookie.com/embed/WYFyh6fpYMQ?si=wu_en9aoeX9YXxI7';
+
 function getStreamSettings() {
   return {
-    url: localStorage.getItem('ashara_stream_url') || '',
+    url: localStorage.getItem('ashara_stream_url') || DEFAULT_STREAM_URL,
     live: localStorage.getItem('ashara_stream_live') === 'true'
   };
 }
@@ -1259,6 +1291,7 @@ function extractYouTubeId(url) {
     /youtu\.be\/([A-Za-z0-9_-]{11})/,
     /youtube\.com\/live\/([A-Za-z0-9_-]{11})/,
     /youtube\.com\/embed\/([A-Za-z0-9_-]{11})/,
+    /youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/,
     /youtube\.com\/v\/([A-Za-z0-9_-]{11})/
   ];
   for (const p of patterns) {
@@ -1277,22 +1310,52 @@ function renderStreamViewer() {
     badge.className = 'live-badge';
     badge.innerHTML = '<span class="live-dot"></span> LIVE';
 
-    const videoId = extractYouTubeId(s.url);
+    const platform = localStorage.getItem('ashara_platform') || 'youtube';
 
-    if (videoId) {
-      const existing = body.querySelector('#yt-player-container');
-      if (!existing || body.dataset.loadedId !== videoId) {
-        body.dataset.loadedId = videoId;
-        body.innerHTML = `
-          <div class="video-wrapper" id="yt-player-container">
-            <div id="yt-player"></div>
-          </div>`;
-        loadYouTubePlayer(videoId, s.url);
+    if (platform === 'twitch') {
+      // Twitch embed — s.url is the channel name
+      const channel = s.url.trim().replace(/.*twitch\.tv\//i, '').split('?')[0];
+      const parent = window.location.hostname || 'localhost';
+      const twitchSrc = `https://player.twitch.tv/?channel=${channel}&parent=${parent}&autoplay=true`;
+      const existing = body.querySelector('iframe');
+      if (!existing || body.dataset.loadedId !== channel) {
+        body.dataset.loadedId = channel;
+        body.innerHTML = `<div class="video-wrapper">
+          <iframe src="${twitchSrc}"
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+            allowfullscreen frameborder="0"></iframe>
+        </div>`;
       }
+
+    } else if (platform === 'youtube') {
+      const videoId = extractYouTubeId(s.url);
+      if (videoId) {
+        const existing = body.querySelector('#yt-player-container');
+        if (!existing || body.dataset.loadedId !== videoId) {
+          body.dataset.loadedId = videoId;
+          const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+          // Always build a clean nocookie embed URL — never use raw embed URLs as-is
+          const embedSrc = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
+
+          body.innerHTML = `
+            <div id="yt-player-container" class="video-wrapper">
+              <iframe src="${embedSrc}"
+                title="YouTube video player" frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                referrerpolicy="strict-origin-when-cross-origin" allowfullscreen>
+              </iframe>
+            </div>`;
+        }
+      } else {
+        body.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--text-muted);">Invalid YouTube URL. Please check the admin panel.</div>`;
+      }
+
     } else {
-      // Non-YouTube URL — embed directly
+      // Custom iframe URL
       const existing = body.querySelector('iframe');
       if (!existing || existing.src !== s.url) {
+        body.dataset.loadedId = s.url;
         body.innerHTML = `<div class="video-wrapper">
           <iframe src="${s.url}"
             allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
@@ -1300,6 +1363,7 @@ function renderStreamViewer() {
         </div>`;
       }
     }
+
   } else {
     body.dataset.loadedId = '';
     if (!body.querySelector('.stream-offline-screen')) {
@@ -1372,10 +1436,31 @@ function renderAdmin() {
   setInterval(renderAttendanceAdmin, 15000);
 }
 
+function setPlatform(p) {
+  localStorage.setItem('ashara_platform', p);
+  ['youtube','twitch','custom'].forEach(id => {
+    document.getElementById('plat-' + id).classList.toggle('plat-active', id === p);
+  });
+  const hints = {
+    youtube: 'Paste the full YouTube watch URL, e.g. https://youtube.com/watch?v=XXXXX',
+    twitch:  'Enter your Twitch channel name only, e.g.  mychannel',
+    custom:  'Paste any direct embed/iframe src URL from any platform.'
+  };
+  const placeholders = {
+    youtube: 'https://www.youtube.com/watch?v=XXXXXXXXXXX',
+    twitch:  'Your Twitch channel name (e.g. mychannel)',
+    custom:  'https://player.example.com/embed/...'
+  };
+  document.getElementById('platform-hint').textContent = hints[p];
+  document.getElementById('admin-stream-url').placeholder = placeholders[p];
+}
+
 function renderStreamAdmin() {
   const s = getStreamSettings();
+  const platform = localStorage.getItem('ashara_platform') || 'youtube';
   document.getElementById('admin-stream-url').value = s.url;
   document.getElementById('stream-live-toggle').checked = s.live;
+  setPlatform(platform);
 }
 
 function saveStreamSettings() {
