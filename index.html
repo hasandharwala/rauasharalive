@@ -989,6 +989,26 @@
     min-height: 42px;
   }
 
+  /* Completely hide YouTube branding when paused or initially loading */
+  .plyr.plyr--youtube.plyr--paused .plyr__video-wrapper {
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
+  
+  #custom-play-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: black;
+    color: white;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    cursor: pointer;
+  }
+
   @media (max-width: 600px) {
     .checkin-bar { flex-direction: column; align-items: stretch; text-align: center; }
     .schedule-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1343,8 +1363,12 @@ function renderStreamViewerWith(s) {
         if (!existing || body.dataset.loadedId !== videoId) {
           body.dataset.loadedId = videoId;
           body.innerHTML = `
-            <div id="yt-player-container" class="video-wrapper">
+            <div id="yt-player-container" class="video-wrapper" style="position:relative;">
               <div id="plyr-youtube-player" data-plyr-provider="youtube" data-plyr-embed-id="${videoId}"></div>
+              <div id="custom-play-overlay" onclick="if(window.plyrInstance) window.plyrInstance.play()">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="white" style="margin-bottom:15px; opacity:0.8;"><path d="M8 5v14l11-7z"/></svg>
+                <div style="color:rgba(255,255,255,0.8); font-size:1rem;">Tap to Resume Stream</div>
+              </div>
             </div>`;
           
           setTimeout(() => {
@@ -1356,6 +1380,11 @@ function renderStreamViewerWith(s) {
               controls: ['mute', 'volume', 'settings', 'fullscreen'], // Removed play buttons
               youtube: { rel: 0, iv_load_policy: 3, modestbranding: 1, controls: 0 }
             });
+
+            const overlay = document.getElementById('custom-play-overlay');
+            window.plyrInstance.on('pause', () => { if(overlay) overlay.style.display = 'flex'; });
+            window.plyrInstance.on('play', () => { if(overlay) overlay.style.display = 'none'; });
+            window.plyrInstance.on('playing', () => { if(overlay) overlay.style.display = 'none'; });
           }, 50);
         }
       } else {
