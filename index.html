@@ -1241,7 +1241,7 @@ function renderStreamViewerWith(s) {
         const existing = body.querySelector('#yt-player-container');
         if (!existing || body.dataset.loadedId !== videoId) {
           body.dataset.loadedId = videoId;
-          const embedSrc = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1`;
+          const embedSrc = `https://www.youtube.com/embed/${videoId}?autoplay=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3`;
           body.innerHTML = `
             <div id="yt-player-container" class="video-wrapper">
               <iframe src="${embedSrc}" title="YouTube video player" frameborder="0"
