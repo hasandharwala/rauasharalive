@@ -1150,6 +1150,7 @@
 // ═══════════════════════════════════════════════════
 import { initializeApp }                         from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import { getDatabase, ref, set, get, onValue }   from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC2wJXEV6-szmr0kEaW0o_fei0zekEJnDc',
@@ -1160,10 +1161,15 @@ const firebaseConfig = {
   messagingSenderId: '218756131524',
   appId: '1:218756131524:web:33d0bf8a9e2972eac63791'
 };
+
 const app = initializeApp(firebaseConfig);
 const db  = getDatabase(app);
+const auth = getAuth(app);
 
-const DEFAULT_ITS = ['60472330','30184721','40293817','50183920','70293810'];
+// Secondary app for admin to create users without getting logged out
+const adminApp = initializeApp(firebaseConfig, "AdminApp");
+const adminAuth = getAuth(adminApp);
+
 const DEFAULT_SCHEDULE = [
   { day: 'Day 1', date: '25 Jun', time: '7:45 PM' },
   { day: 'Day 2', date: '26 Jun', time: '7:45 PM' },
@@ -1189,11 +1195,18 @@ function todayKey()          { return new Date().toISOString().slice(0,10); }
 async function getMembers() {
   try {
     const snap = await get(ref(db, 'members'));
-    if (snap.exists()) { const v=snap.val(); return Array.isArray(v)?v:Object.values(v); }
+    if (snap.exists()) { 
+      const v = snap.val(); 
+      return Array.isArray(v) ? v : Object.keys(v); 
+    }
   } catch(e) {}
-  return [...DEFAULT_ITS];
+  return [];
 }
-async function saveMembers(m) { await set(ref(db, 'members'), m); }
+async function saveMembers(m) { 
+  const obj = {};
+  m.forEach(id => obj[id] = true);
+  await set(ref(db, 'members'), obj); 
+}
 
 // ─── FIREBASE: STREAM SETTINGS ───
 async function getStreamSettings() {
@@ -1215,16 +1228,17 @@ async function doLogin() {
   const pass = document.getElementById('login-pass').value.trim();
   const err  = document.getElementById('login-error');
   err.style.display = 'none';
-  if (id === 'admin' && pass === 'admin786') {
-    currentUser = { role:'admin', id:'admin' };
-    showPage('admin-page'); renderAdmin(); return;
+  
+  if (!id || !pass) { err.style.display = 'block'; return; }
+  
+  const email = (id.toLowerCase() === 'admin') ? 'admin@ashara.live' : `${id}@ashara.live`;
+  
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    // onAuthStateChanged will handle the UI redirect
+  } catch(e) {
+    err.style.display = 'block';
   }
-  const members = await getMembers();
-  if (members.includes(id) && pass === id) {
-    currentUser = { role:'member', id };
-    showPage('viewer-page'); renderViewer(); return;
-  }
-  err.style.display = 'block';
 }
 window.doLogin = doLogin;
 
@@ -1233,12 +1247,7 @@ document.addEventListener('keydown', e => {
 });
 
 function doLogout() {
-  currentUser = null;
-  if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
-  showPage('login-page');
-  document.getElementById('login-id').value   = '';
-  document.getElementById('login-pass').value = '';
-  document.getElementById('login-error').style.display = 'none';
+  signOut(auth);
 }
 window.doLogout = doLogout;
 
@@ -1246,6 +1255,51 @@ function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(id).classList.add('active');
 }
+
+// ─── FIREBASE AUTH LISTENER ───
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    const isAdmin = user.email === 'admin@ashara.live';
+    const id = isAdmin ? 'admin' : user.email.split('@')[0];
+    
+    // Safety check: Ensure standard members are still in the allowed DB list securely
+    if (!isAdmin) {
+      try {
+        const snap = await get(ref(db, `members/${id}`));
+        if (!snap.exists() || snap.val() !== true) {
+          // If legacy array or not found, revoke access
+          signOut(auth); 
+          return;
+        }
+      } catch(e) {
+        signOut(auth);
+        return;
+      }
+    }
+    
+    currentUser = { role: isAdmin ? 'admin' : 'member', id };
+    if (isAdmin) {
+      showPage('admin-page'); renderAdmin();
+    } else {
+      showPage('viewer-page'); renderViewer();
+    }
+  } else {
+    // Logged Out State
+    currentUser = null;
+    if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
+    if (window.plyrInstance) { window.plyrInstance.destroy(); window.plyrInstance = null; }
+    const streamBody = document.getElementById('stream-body');
+    if (streamBody) { streamBody.innerHTML = ''; streamBody.dataset.loadedId = ''; }
+    
+    showPage('login-page');
+    const idInput = document.getElementById('login-id');
+    const passInput = document.getElementById('login-pass');
+    if (idInput) idInput.value = '';
+    if (passInput) passInput.value = '';
+    const err = document.getElementById('login-error');
+    if (err) err.style.display = 'none';
+  }
+});
 
 // ═══════════════════════════════════════════════════
 //  VIEWER — real-time Firebase listener
@@ -1438,6 +1492,16 @@ async function addMember() {
   if (!id) return;
   const members = await getMembers();
   if (members.includes(id)) { showToast('ID already exists'); return; }
+  
+  try {
+    // Securely register the new user in Firebase Auth so they can login.
+    // Using adminAuth ensures the current admin does not get logged out!
+    await createUserWithEmailAndPassword(adminAuth, `${id}@ashara.live`, id);
+  } catch (e) {
+    // If account already exists in Auth, that's fine, we still add them back to the list
+    console.log('Firebase Auth:', e.message);
+  }
+
   members.push(id);
   await saveMembers(members);
   input.value = '';
