@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1097,12 +1097,26 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<script>
+<script type="module">
 // ═══════════════════════════════════════════════════
-//  STATE
+//  FIREBASE SETUP
 // ═══════════════════════════════════════════════════
-const DEFAULT_ITS = ['60472330','30184721','40293817','50183920','70293810'];
+import { initializeApp }                         from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
+import { getDatabase, ref, set, get, onValue }   from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js';
 
+const firebaseConfig = {
+  apiKey: 'AIzaSyC2wJXEV6-szmr0kEaW0o_fei0zekEJnDc',
+  authDomain: 'ashara-live-rau.firebaseapp.com',
+  databaseURL: 'https://ashara-live-rau-default-rtdb.asia-southeast1.firebasedatabase.app',
+  projectId: 'ashara-live-rau',
+  storageBucket: 'ashara-live-rau.firebasestorage.app',
+  messagingSenderId: '218756131524',
+  appId: '1:218756131524:web:33d0bf8a9e2972eac63791'
+};
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+
+const DEFAULT_ITS = ['60472330','30184721','40293817','50183920','70293810'];
 const DEFAULT_SCHEDULE = [
   { day: 'Day 1', date: '25 Jun', time: '7:45 PM' },
   { day: 'Day 2', date: '26 Jun', time: '7:45 PM' },
@@ -1114,91 +1128,72 @@ const DEFAULT_SCHEDULE = [
   { day: 'Day 8', date: '02 Jul', time: '7:45 PM' },
   { day: 'Day 9', date: '03 Jul', time: '7:45 PM' },
 ];
-
-function getMembers() {
-  const s = localStorage.getItem('ashara_members');
-  return s ? JSON.parse(s) : [...DEFAULT_ITS];
-}
-
-function saveMembers(m) {
-  localStorage.setItem('ashara_members', JSON.stringify(m));
-}
-
-function getSchedule() {
-  const s = localStorage.getItem('ashara_schedule');
-  return s ? JSON.parse(s) : [...DEFAULT_SCHEDULE];
-}
-
-function saveScheduleData(d) {
-  localStorage.setItem('ashara_schedule', JSON.stringify(d));
-}
-
-const DEFAULT_STREAM_URL = 'https://www.youtube-nocookie.com/embed/WYFyh6fpYMQ?si=wu_en9aoeX9YXxI7';
-
-function getStreamSettings() {
-  return {
-    url: localStorage.getItem('ashara_stream_url') || DEFAULT_STREAM_URL,
-    live: localStorage.getItem('ashara_stream_live') === 'true'
-  };
-}
-
-function getAttendance() {
-  const s = localStorage.getItem('ashara_attendance_' + todayKey());
-  return s ? JSON.parse(s) : [];
-}
-
-function saveAttendance(a) {
-  localStorage.setItem('ashara_attendance_' + todayKey(), JSON.stringify(a));
-}
-
-function todayKey() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
-}
-
+const DEFAULT_STREAM_URL = 'https://www.youtube-nocookie.com/embed/WYFyh6fpYMQ';
 let currentUser = null;
+
+// ─── LOCAL ONLY (attendance + schedule stay on device) ───
+function getSchedule()       { const s=localStorage.getItem('ashara_schedule'); return s?JSON.parse(s):[...DEFAULT_SCHEDULE]; }
+function saveScheduleData(d) { localStorage.setItem('ashara_schedule',JSON.stringify(d)); }
+function getAttendance()     { const s=localStorage.getItem('ashara_attendance_'+todayKey()); return s?JSON.parse(s):[]; }
+function saveAttendance(a)   { localStorage.setItem('ashara_attendance_'+todayKey(),JSON.stringify(a)); }
+function todayKey()          { return new Date().toISOString().slice(0,10); }
+
+// ─── FIREBASE: MEMBERS ───
+async function getMembers() {
+  try {
+    const snap = await get(ref(db, 'members'));
+    if (snap.exists()) { const v=snap.val(); return Array.isArray(v)?v:Object.values(v); }
+  } catch(e) {}
+  return [...DEFAULT_ITS];
+}
+async function saveMembers(m) { await set(ref(db, 'members'), m); }
+
+// ─── FIREBASE: STREAM SETTINGS ───
+async function getStreamSettings() {
+  try {
+    const snap = await get(ref(db, 'stream'));
+    if (snap.exists()) {
+      const v = snap.val();
+      return { url: v.url||DEFAULT_STREAM_URL, live: !!v.live, platform: v.platform||'youtube' };
+    }
+  } catch(e) {}
+  return { url: DEFAULT_STREAM_URL, live: false, platform: 'youtube' };
+}
 
 // ═══════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════
-function doLogin() {
-  const id = document.getElementById('login-id').value.trim();
+async function doLogin() {
+  const id   = document.getElementById('login-id').value.trim();
   const pass = document.getElementById('login-pass').value.trim();
-  const err = document.getElementById('login-error');
+  const err  = document.getElementById('login-error');
   err.style.display = 'none';
-
   if (id === 'admin' && pass === 'admin786') {
-    currentUser = { role: 'admin', id: 'admin' };
-    showPage('admin-page');
-    renderAdmin();
-    return;
+    currentUser = { role:'admin', id:'admin' };
+    showPage('admin-page'); renderAdmin(); return;
   }
-
-  const members = getMembers();
+  const members = await getMembers();
   if (members.includes(id) && pass === id) {
-    currentUser = { role: 'member', id };
-    showPage('viewer-page');
-    renderViewer();
-    return;
+    currentUser = { role:'member', id };
+    showPage('viewer-page'); renderViewer(); return;
   }
-
   err.style.display = 'block';
 }
+window.doLogin = doLogin;
 
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') {
-    const lp = document.getElementById('login-page');
-    if (lp.classList.contains('active')) doLogin();
-  }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-page').classList.contains('active')) doLogin();
 });
 
 function doLogout() {
   currentUser = null;
+  if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
   showPage('login-page');
-  document.getElementById('login-id').value = '';
+  document.getElementById('login-id').value   = '';
   document.getElementById('login-pass').value = '';
   document.getElementById('login-error').style.display = 'none';
 }
+window.doLogout = doLogout;
 
 function showPage(id) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1206,86 +1201,86 @@ function showPage(id) {
 }
 
 // ═══════════════════════════════════════════════════
-//  VIEWER
+//  VIEWER — real-time Firebase listener
 // ═══════════════════════════════════════════════════
 function renderViewer() {
   document.getElementById('viewer-nav-user').textContent = 'ITS: ' + currentUser.id;
-  renderStreamViewer();
-  // Auto-refresh stream status every 10 seconds
-  if (window._streamPollTimer) clearInterval(window._streamPollTimer);
-  window._streamPollTimer = setInterval(renderStreamViewer, 10000);
-}
-
-// ═══════════════════════════════════════════════════
-//  YOUTUBE IFRAME API
-// ═══════════════════════════════════════════════════
-let ytApiReady = false;
-let ytApiLoading = false;
-let ytPlayerPendingCall = null;
-
-function loadYouTubeAPI(callback) {
-  if (ytApiReady) { callback(); return; }
-  ytPlayerPendingCall = callback;
-  if (ytApiLoading) return;
-  ytApiLoading = true;
-  const tag = document.createElement('script');
-  tag.src = 'https://www.youtube.com/iframe_api';
-  document.head.appendChild(tag);
-}
-
-window.onYouTubeIframeAPIReady = function() {
-  ytApiReady = true;
-  if (ytPlayerPendingCall) { ytPlayerPendingCall(); ytPlayerPendingCall = null; }
-};
-
-function loadYouTubePlayer(videoId, originalUrl) {
-  loadYouTubeAPI(function() {
-    if (!document.getElementById('yt-player')) return;
-    new YT.Player('yt-player', {
-      videoId: videoId,
-      width: '100%',
-      height: '100%',
-      playerVars: { autoplay: 1, rel: 0, modestbranding: 1, playsinline: 1 },
-      events: {
-        onReady: function(e) { e.target.playVideo(); },
-        onError: function(e) {
-          const container = document.getElementById('yt-player-container');
-          if (container) {
-            container.outerHTML = `
-              <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                          min-height:380px;background:#f8fafc;gap:1.5rem;padding:2.5rem;text-align:center;">
-                <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
-                  <rect width="72" height="72" rx="14" fill="#ad8e6b" opacity="0.12"/>
-                  <path d="M29 23.5L50 36L29 48.5V23.5Z" fill="#ad8e6b"/>
-                </svg>
-                <div style="font-family:'Times New Roman',serif;font-size:1.5rem;color:#1e293b;font-weight:700;">
-                  Stream Cannot Be Embedded
-                </div>
-                <div style="font-size:0.95rem;color:#64748b;max-width:360px;line-height:1.7;">
-                  YouTube is restricting this stream from being embedded on external sites. Tap below to watch it directly on YouTube.
-                </div>
-                <a href="${originalUrl}" target="_blank" rel="noopener"
-                   style="background:#ad8e6b;color:#fff;border-radius:8px;padding:1rem 2.5rem;
-                          font-size:1.05rem;font-weight:600;text-decoration:none;
-                          box-shadow:0 4px 14px rgba(173,142,107,0.35);">
-                  ▶&nbsp; Watch Live on YouTube
-                </a>
-                <span style="font-size:0.78rem;color:#94a3b8;">Opens in a new tab</span>
-              </div>`;
-          }
-        }
-      }
+  if (window._streamUnsub) window._streamUnsub();
+  // onValue fires immediately AND on every future admin change
+  window._streamUnsub = onValue(ref(db, 'stream'), snap => {
+    const data = snap.exists() ? snap.val() : {};
+    renderStreamViewerWith({
+      url:      data.url      || DEFAULT_STREAM_URL,
+      live:     !!data.live,
+      platform: data.platform || 'youtube'
     });
   });
 }
 
+function renderStreamViewerWith(s) {
+  const body  = document.getElementById('stream-body');
+  const badge = document.getElementById('live-status-badge');
+
+  if (s.live && s.url) {
+    badge.className = 'live-badge';
+    badge.innerHTML = '<span class="live-dot"></span> LIVE';
+    const platform = s.platform || 'youtube';
+
+    if (platform === 'twitch') {
+      const channel   = s.url.trim().replace(/.*twitch\.tv\//i,'').split('?')[0];
+      const parent    = window.location.hostname || 'localhost';
+      const twitchSrc = `https://player.twitch.tv/?channel=${channel}&parent=${parent}&autoplay=true`;
+      const existing  = body.querySelector('iframe');
+      if (!existing || body.dataset.loadedId !== channel) {
+        body.dataset.loadedId = channel;
+        body.innerHTML = `<div class="video-wrapper"><iframe src="${twitchSrc}" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen frameborder="0"></iframe></div>`;
+      }
+    } else if (platform === 'youtube') {
+      const videoId = extractYouTubeId(s.url);
+      if (videoId) {
+        const existing = body.querySelector('#yt-player-container');
+        if (!existing || body.dataset.loadedId !== videoId) {
+          body.dataset.loadedId = videoId;
+          const embedSrc = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
+          body.innerHTML = `
+            <div id="yt-player-container" class="video-wrapper" style="position:relative;">
+              <iframe src="${embedSrc}" title="YouTube video player" frameborder="0"
+                allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture;web-share"
+                referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+              <div style="position:absolute;top:0;left:0;right:44px;height:56px;background:#000;z-index:2;pointer-events:none;"></div>
+              <div style="position:absolute;bottom:0;left:0;right:44px;height:50px;background:#000;z-index:2;pointer-events:none;"></div>
+            </div>`;
+        }
+      } else {
+        body.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">Invalid YouTube URL.</div>';
+      }
+    } else {
+      const existing = body.querySelector('iframe');
+      if (!existing || existing.src !== s.url) {
+        body.dataset.loadedId = s.url;
+        body.innerHTML = `<div class="video-wrapper"><iframe src="${s.url}" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen frameborder="0"></iframe></div>`;
+      }
+    }
+  } else {
+    body.dataset.loadedId = '';
+    badge.className = 'offline-badge';
+    badge.innerHTML = 'Offline';
+    body.innerHTML = `<div class="stream-offline-screen">
+      <svg class="mandala-loader" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="40" cy="40" r="36" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
+        <circle cx="40" cy="40" r="28" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
+        <circle cx="40" cy="40" r="20" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
+        <polygon points="40,6 46,30 70,30 51,46 58,70 40,55 22,70 29,46 10,30 34,30" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
+        <circle cx="40" cy="40" r="5" fill="#ad8e6b" opacity="0.8"/>
+      </svg>
+      <div class="offline-text">Stream Offline<br>
+        <span style="font-size:1rem;color:var(--text-muted);">The broadcast has not started yet - Please wait.</span>
+      </div>
+    </div>`;
+  }
+}
+
 function extractYouTubeId(url) {
-  // Handles all YouTube URL formats:
-  // youtube.com/watch?v=ID
-  // youtu.be/ID
-  // youtube.com/live/ID
-  // youtube.com/embed/ID
-  // youtube.com/v/ID
   const patterns = [
     /[?&]v=([A-Za-z0-9_-]{11})/,
     /youtu\.be\/([A-Za-z0-9_-]{11})/,
@@ -1294,156 +1289,49 @@ function extractYouTubeId(url) {
     /youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/,
     /youtube\.com\/v\/([A-Za-z0-9_-]{11})/
   ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
+  for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
   return null;
 }
 
-function renderStreamViewer() {
-  const s = getStreamSettings();
-  const body = document.getElementById('stream-body');
-  const badge = document.getElementById('live-status-badge');
-
-  if (s.live && s.url) {
-    badge.className = 'live-badge';
-    badge.innerHTML = '<span class="live-dot"></span> LIVE';
-
-    const platform = localStorage.getItem('ashara_platform') || 'youtube';
-
-    if (platform === 'twitch') {
-      // Twitch embed — s.url is the channel name
-      const channel = s.url.trim().replace(/.*twitch\.tv\//i, '').split('?')[0];
-      const parent = window.location.hostname || 'localhost';
-      const twitchSrc = `https://player.twitch.tv/?channel=${channel}&parent=${parent}&autoplay=true`;
-      const existing = body.querySelector('iframe');
-      if (!existing || body.dataset.loadedId !== channel) {
-        body.dataset.loadedId = channel;
-        body.innerHTML = `<div class="video-wrapper">
-          <iframe src="${twitchSrc}"
-            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-            allowfullscreen frameborder="0"></iframe>
-        </div>`;
-      }
-
-    } else if (platform === 'youtube') {
-      const videoId = extractYouTubeId(s.url);
-      if (videoId) {
-        const existing = body.querySelector('#yt-player-container');
-        if (!existing || body.dataset.loadedId !== videoId) {
-          body.dataset.loadedId = videoId;
-          const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-          // Always build a clean nocookie embed URL — never use raw embed URLs as-is
-          const embedSrc = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1&playsinline=1`;
-
-          body.innerHTML = `
-            <div id="yt-player-container" class="video-wrapper">
-              <iframe src="${embedSrc}"
-                title="YouTube video player" frameborder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                referrerpolicy="strict-origin-when-cross-origin" allowfullscreen>
-              </iframe>
-            </div>`;
-        }
-      } else {
-        body.innerHTML = `<div style="padding:2rem;text-align:center;color:var(--text-muted);">Invalid YouTube URL. Please check the admin panel.</div>`;
-      }
-
-    } else {
-      // Custom iframe URL
-      const existing = body.querySelector('iframe');
-      if (!existing || existing.src !== s.url) {
-        body.dataset.loadedId = s.url;
-        body.innerHTML = `<div class="video-wrapper">
-          <iframe src="${s.url}"
-            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-            allowfullscreen frameborder="0"></iframe>
-        </div>`;
-      }
-    }
-
-  } else {
-    body.dataset.loadedId = '';
-    if (!body.querySelector('.stream-offline-screen')) {
-      badge.className = 'offline-badge';
-      badge.innerHTML = 'Offline';
-      body.innerHTML = `<div class="stream-offline-screen">
-        <svg class="mandala-loader" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="40" cy="40" r="36" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-          <circle cx="40" cy="40" r="28" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
-          <circle cx="40" cy="40" r="20" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
-          <polygon points="40,6 46,30 70,30 51,46 58,70 40,55 22,70 29,46 10,30 34,30" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-          <circle cx="40" cy="40" r="5" fill="#ad8e6b" opacity="0.8"/>
-        </svg>
-        <div class="offline-text">
-          Stream Offline<br>
-          <span style="font-size:1rem; color:var(--text-muted);">The broadcast has not started yet — Please wait.</span>
-        </div>
-      </div>`;
-    }
-  }
-}
-
-function renderScheduleViewer() {
-  const grid = document.getElementById('schedule-grid');
-  const schedule = getSchedule();
-  grid.innerHTML = '';
-  schedule.forEach((s, i) => {
-    const card = document.createElement('div');
-    card.className = 'schedule-card' + (i === 0 ? ' today' : '');
-    card.innerHTML = `
-      <div class="schedule-day">${s.day}</div>
-      <div class="schedule-num">${i + 1}</div>
-      <div class="schedule-date">${s.date}</div>
-      <div class="schedule-time">${s.time}</div>`;
-    grid.appendChild(card);
-  });
-}
-
+// ═══════════════════════════════════════════════════
+//  CHECK-IN
+// ═══════════════════════════════════════════════════
 function checkIfCheckedIn() {
   const att = getAttendance();
   const alreadyIn = att.find(a => a.id === currentUser.id);
   const btn = document.getElementById('checkin-btn');
-  if (alreadyIn) {
-    btn.disabled = true;
-    btn.textContent = '✓ Checked In';
-  } else {
-    btn.disabled = false;
-    btn.textContent = 'Check In ✓';
-  }
+  if (alreadyIn) { btn.disabled=true;  btn.textContent='✓ Checked In'; }
+  else           { btn.disabled=false; btn.textContent='Check In ✓';   }
 }
+window.checkIfCheckedIn = checkIfCheckedIn;
 
 function doCheckIn() {
   const att = getAttendance();
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-  att.push({ id: currentUser.id, time: timeStr });
+  att.push({ id: currentUser.id, time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) });
   saveAttendance(att);
   checkIfCheckedIn();
-  showToast('✓ Attendance marked — Thank you');
+  showToast('✓ Attendance marked - Thank you');
 }
+window.doCheckIn = doCheckIn;
 
 // ═══════════════════════════════════════════════════
 //  ADMIN
 // ═══════════════════════════════════════════════════
-function renderAdmin() {
-  renderStreamAdmin();
-  renderMembersAdmin();
+async function renderAdmin() {
+  await renderStreamAdmin();
+  await renderMembersAdmin();
   renderScheduleAdmin();
   renderAttendanceAdmin();
   setInterval(renderAttendanceAdmin, 15000);
 }
 
 function setPlatform(p) {
-  localStorage.setItem('ashara_platform', p);
-  ['youtube','twitch','custom'].forEach(id => {
-    document.getElementById('plat-' + id).classList.toggle('plat-active', id === p);
-  });
+  window._currentPlatform = p;
+  ['youtube','twitch','custom'].forEach(id =>
+    document.getElementById('plat-'+id).classList.toggle('plat-active', id===p));
   const hints = {
     youtube: 'Paste the full YouTube watch URL, e.g. https://youtube.com/watch?v=XXXXX',
-    twitch:  'Enter your Twitch channel name only, e.g.  mychannel',
+    twitch:  'Enter your Twitch channel name only, e.g. mychannel',
     custom:  'Paste any direct embed/iframe src URL from any platform.'
   };
   const placeholders = {
@@ -1451,77 +1339,79 @@ function setPlatform(p) {
     twitch:  'Your Twitch channel name (e.g. mychannel)',
     custom:  'https://player.example.com/embed/...'
   };
-  document.getElementById('platform-hint').textContent = hints[p];
+  document.getElementById('platform-hint').textContent    = hints[p];
   document.getElementById('admin-stream-url').placeholder = placeholders[p];
 }
+window.setPlatform = setPlatform;
 
-function renderStreamAdmin() {
-  const s = getStreamSettings();
-  const platform = localStorage.getItem('ashara_platform') || 'youtube';
-  document.getElementById('admin-stream-url').value = s.url;
+async function renderStreamAdmin() {
+  const s = await getStreamSettings();
+  document.getElementById('admin-stream-url').value     = s.url;
   document.getElementById('stream-live-toggle').checked = s.live;
-  setPlatform(platform);
+  setPlatform(s.platform);
 }
 
-function saveStreamSettings() {
-  const url = document.getElementById('admin-stream-url').value.trim();
-  const live = document.getElementById('stream-live-toggle').checked;
-  localStorage.setItem('ashara_stream_url', url);
-  localStorage.setItem('ashara_stream_live', live ? 'true' : 'false');
-  const msg = document.getElementById('stream-save-msg');
-  msg.style.display = 'block';
-  setTimeout(() => msg.style.display = 'none', 3000);
-  showToast('Stream settings saved!');
+async function saveStreamSettings() {
+  const url      = document.getElementById('admin-stream-url').value.trim();
+  const live     = document.getElementById('stream-live-toggle').checked;
+  const platform = window._currentPlatform || 'youtube';
+  try {
+    await set(ref(db, 'stream'), { url, live, platform });
+    const msg = document.getElementById('stream-save-msg');
+    msg.style.display = 'block';
+    setTimeout(() => msg.style.display='none', 3000);
+    showToast('Saved - all devices updated instantly!');
+  } catch(e) {
+    showToast('Save failed - check internet connection');
+  }
 }
+window.saveStreamSettings = saveStreamSettings;
 
-function renderMembersAdmin() {
-  const members = getMembers();
-  const list = document.getElementById('members-list');
+async function renderMembersAdmin() {
+  const members = await getMembers();
+  const list    = document.getElementById('members-list');
   if (members.length === 0) {
-    list.innerHTML = '<div style="padding:1rem; text-align:center; color:var(--text-muted); font-size:0.85rem;">No members added.</div>';
+    list.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.85rem;">No members added.</div>';
     return;
   }
-  list.innerHTML = members.map(m => `
-    <div class="member-row">
-      <span class="att-id">${m}</span>
-      <button class="btn-remove" onclick="removeMember('${m}')">Remove</button>
-    </div>`).join('');
+  list.innerHTML = members.map(m =>
+    `<div class="member-row"><span class="att-id">${m}</span><button class="btn-remove" onclick="removeMember('${m}')">Remove</button></div>`
+  ).join('');
 }
 
-function addMember() {
-  const input = document.getElementById('new-member-id');
-  const id = input.value.trim();
+async function addMember() {
+  const input   = document.getElementById('new-member-id');
+  const id      = input.value.trim();
   if (!id) return;
-  const members = getMembers();
+  const members = await getMembers();
   if (members.includes(id)) { showToast('ID already exists'); return; }
   members.push(id);
-  saveMembers(members);
+  await saveMembers(members);
   input.value = '';
-  renderMembersAdmin();
-  showToast('✓ Member added: ' + id);
+  await renderMembersAdmin();
+  showToast('Member added: ' + id);
 }
+window.addMember = addMember;
 
-function removeMember(id) {
-  const members = getMembers().filter(m => m !== id);
-  saveMembers(members);
-  renderMembersAdmin();
+async function removeMember(id) {
+  const members = (await getMembers()).filter(m => m !== id);
+  await saveMembers(members);
+  await renderMembersAdmin();
   showToast('Member removed: ' + id);
 }
+window.removeMember = removeMember;
 
 function renderAttendanceAdmin() {
-  const att = getAttendance();
+  const att  = getAttendance();
   document.getElementById('att-count').textContent = att.length;
   const list = document.getElementById('attendance-list');
   if (att.length === 0) {
-    list.innerHTML = '<div style="padding:1rem; text-align:center; color:var(--text-muted); font-size:0.85rem;">No check-ins yet today.</div>';
+    list.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.85rem;">No check-ins yet today.</div>';
     return;
   }
-  list.innerHTML = att.map(a => `
-    <div class="att-row">
-      <span class="att-id">${a.id}</span>
-      <span class="att-time">${a.time}</span>
-      <span class="att-online"></span>
-    </div>`).join('');
+  list.innerHTML = att.map(a =>
+    `<div class="att-row"><span class="att-id">${a.id}</span><span class="att-time">${a.time}</span><span class="att-online"></span></div>`
+  ).join('');
 }
 
 function resetAttendance() {
@@ -1530,30 +1420,29 @@ function resetAttendance() {
   renderAttendanceAdmin();
   showToast('Attendance reset');
 }
+window.resetAttendance = resetAttendance;
 
 function renderScheduleAdmin() {
   const schedule = getSchedule();
-  const editor = document.getElementById('schedule-editor');
-  editor.innerHTML = schedule.map((s, i) => `
-    <div class="sched-row">
-      <label>${s.day}</label>
-      <input type="text" id="sched-date-${i}" value="${s.date}" placeholder="DD Mon">
-      <input type="text" id="sched-time-${i}" value="${s.time}" placeholder="H:MM PM">
-    </div>`).join('');
+  const editor   = document.getElementById('schedule-editor');
+  if (!editor) return;
+  editor.innerHTML = schedule.map((s,i) =>
+    `<div class="sched-row"><label>${s.day}</label><input type="text" id="sched-date-${i}" value="${s.date}" placeholder="DD Mon"><input type="text" id="sched-time-${i}" value="${s.time}" placeholder="H:MM PM"></div>`
+  ).join('');
 }
 
 function saveSchedule() {
   const schedule = getSchedule();
-  schedule.forEach((s, i) => {
-    s.date = document.getElementById('sched-date-' + i).value.trim() || s.date;
-    s.time = document.getElementById('sched-time-' + i).value.trim() || s.time;
+  schedule.forEach((s,i) => {
+    s.date = document.getElementById('sched-date-'+i).value.trim() || s.date;
+    s.time = document.getElementById('sched-time-'+i).value.trim() || s.time;
   });
   saveScheduleData(schedule);
   const msg = document.getElementById('sched-save-msg');
-  msg.style.display = 'block';
-  setTimeout(() => msg.style.display = 'none', 3000);
-  showToast('✓ Schedule saved');
+  if (msg) { msg.style.display='block'; setTimeout(()=>msg.style.display='none',3000); }
+  showToast('Schedule saved');
 }
+window.saveSchedule = saveSchedule;
 
 // ═══════════════════════════════════════════════════
 //  TOAST
@@ -1566,6 +1455,8 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
+window.showToast = showToast;
+
 </script>
 </body>
 </html>
