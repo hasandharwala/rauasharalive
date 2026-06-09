@@ -1377,6 +1377,8 @@ onAuthStateChanged(auth, async (user) => {
 // ═══════════════════════════════════════════════════
 //  VIEWER — real-time Firebase listener
 // ═══════════════════════════════════════════════════
+let hasStreamPlayed = false;
+
 function renderViewer() {
   document.getElementById('viewer-nav-user').textContent = 'ITS: ' + currentUser.id;
   if (window._streamUnsub) window._streamUnsub();
@@ -1396,6 +1398,7 @@ function renderStreamViewerWith(s) {
   const badge = document.getElementById('live-status-badge');
 
   if (s.live && s.url) {
+    hasStreamPlayed = true;
     badge.className = 'live-badge';
     badge.innerHTML = '<span class="live-dot"></span> LIVE';
     const platform = s.platform || 'youtube';
@@ -1471,16 +1474,18 @@ function renderStreamViewerWith(s) {
     body.dataset.loadedId = '';
     badge.className = 'offline-badge';
     badge.innerHTML = 'Offline';
+
+    const offlineMessage = hasStreamPlayed 
+      ? 'The stream has been ended.' 
+      : 'The broadcast has not started yet - Please wait.';
+
     body.innerHTML = `<div class="stream-offline-screen">
-      <svg class="mandala-loader" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="40" cy="40" r="36" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-        <circle cx="40" cy="40" r="28" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
-        <circle cx="40" cy="40" r="20" fill="none" stroke="#ad8e6b" stroke-width="1" opacity="0.4"/>
-        <polygon points="40,6 46,30 70,30 51,46 58,70 40,55 22,70 29,46 10,30 34,30" fill="none" stroke="#ad8e6b" stroke-width="1.5" opacity="0.6"/>
-        <circle cx="40" cy="40" r="5" fill="#ad8e6b" opacity="0.8"/>
+      <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width: 80px; height: 80px; margin-bottom: 1.5rem; opacity: 0.4;">
+        <circle cx="12" cy="12" r="2"></circle>
+        <path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path>
       </svg>
       <div class="offline-text">Stream Offline<br>
-        <span style="font-size:1rem;color:var(--text-muted);">The broadcast has not started yet - Please wait.</span>
+        <span style="font-size:1rem;color:var(--text-muted);">${offlineMessage}</span>
       </div>
     </div>`;
   }
