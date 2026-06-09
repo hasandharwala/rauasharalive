@@ -1449,6 +1449,7 @@ function renderStreamViewerWith(s) {
             window.plyrInstance = new Plyr('#plyr-youtube-player', {
               autoplay: true,
               clickToPlay: false, // Prevents pausing by clicking the video
+              ratio: '16:9', // Force exact widescreen aspect ratio
               keyboard: { focused: false, global: false }, // Prevents pausing with spacebar
               controls: ['mute', 'volume', 'settings', 'fullscreen'], // Removed play buttons
               youtube: { rel: 0, iv_load_policy: 3, modestbranding: 1, controls: 0 }
