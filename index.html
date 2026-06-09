@@ -1161,6 +1161,7 @@
       <label style="font-size:0.75rem; color:var(--text-muted); letter-spacing:0.08em; text-transform:uppercase; display:block; margin-bottom:0.5rem;">Platform</label>
       <div style="display:flex; gap:0.6rem; margin-bottom:1.2rem; flex-wrap:wrap;">
         <button id="plat-youtube" class="plat-btn plat-active" onclick="setPlatform('youtube')">▶ YouTube</button>
+        <button id="plat-vimeo" class="plat-btn" onclick="setPlatform('vimeo')">Vimeo</button>
         <button id="plat-twitch" class="plat-btn" onclick="setPlatform('twitch')">🟣 Twitch</button>
         <button id="plat-custom" class="plat-btn" onclick="setPlatform('custom')">🔗 Custom URL</button>
       </div>
@@ -1414,6 +1415,40 @@ function renderStreamViewerWith(s) {
         body.dataset.loadedId = channel;
         body.innerHTML = `<div class="video-wrapper"><iframe src="${twitchSrc}" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen frameborder="0"></iframe></div>`;
       }
+    } else if (platform === 'vimeo') {
+      const videoId = extractVimeoId(s.url);
+      if (videoId) {
+        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${videoId}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && data.title) {
+              document.getElementById('stream-title-label').textContent = data.title;
+            }
+          })
+          .catch(err => console.log('Could not fetch Vimeo title', err));
+
+        const existing = body.querySelector('#vimeo-player-container');
+        if (!existing || body.dataset.loadedId !== videoId) {
+          body.dataset.loadedId = videoId;
+          body.innerHTML = `
+            <div id="vimeo-player-container" style="position: relative; background: #000;">
+              <div id="plyr-vimeo-player" data-plyr-provider="vimeo" data-plyr-embed-id="${videoId}"></div>
+            </div>`;
+          
+          setTimeout(() => {
+            if (window.plyrInstance) window.plyrInstance.destroy();
+            window.plyrInstance = new Plyr('#plyr-vimeo-player', {
+              autoplay: true,
+              ratio: '16:9',
+              clickToPlay: false,
+              keyboard: { focused: false, global: false },
+              controls: ['mute', 'volume', 'settings', 'fullscreen']
+            });
+          }, 50);
+        }
+      } else {
+        body.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">Invalid Vimeo URL.</div>';
+      }
     } else if (platform === 'youtube') {
       const videoId = extractYouTubeId(s.url);
       if (videoId) {
@@ -1504,6 +1539,11 @@ function extractYouTubeId(url) {
   return null;
 }
 
+function extractVimeoId(url) {
+  const match = url.match(/(?:vimeo\.com\/|player\.vimeo\.com\/video\/)([0-9]+)/);
+  return match ? match[1] : null;
+}
+
 // ═══════════════════════════════════════════════════
 //  CHECK-IN
 // ═══════════════════════════════════════════════════
@@ -1538,15 +1578,17 @@ async function renderAdmin() {
 
 function setPlatform(p) {
   window._currentPlatform = p;
-  ['youtube','twitch','custom'].forEach(id =>
+  ['youtube','vimeo','twitch','custom'].forEach(id =>
     document.getElementById('plat-'+id).classList.toggle('plat-active', id===p));
   const hints = {
     youtube: 'Paste the full YouTube watch URL, e.g. https://youtube.com/watch?v=XXXXX',
+    vimeo:   'Paste the full Vimeo URL, e.g. https://vimeo.com/12345678',
     twitch:  'Enter your Twitch channel name only, e.g. mychannel',
     custom:  'Paste any direct embed/iframe src URL from any platform.'
   };
   const placeholders = {
     youtube: 'https://www.youtube.com/watch?v=XXXXXXXXXXX',
+    vimeo:   'https://vimeo.com/12345678',
     twitch:  'Your Twitch channel name (e.g. mychannel)',
     custom:  'https://player.example.com/embed/...'
   };
