@@ -1418,33 +1418,29 @@ function renderStreamViewerWith(s) {
     } else if (platform === 'vimeo') {
       const videoId = extractVimeoId(s.url);
       if (videoId) {
-        fetch(`https://vimeo.com/api/oembed.json?url=https://vimeo.com/${videoId}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data && data.title) {
-              document.getElementById('stream-title-label').textContent = data.title;
-            }
-          })
-          .catch(err => console.log('Could not fetch Vimeo title', err));
+        document.getElementById('stream-title-label').textContent = 'Vimeo Live Stream';
+        const isEvent = s.url.includes('event');
+        const srcUrl = isEvent ? `https://vimeo.com/event/${videoId}/embed` : `https://player.vimeo.com/video/${videoId}`;
 
-        const existing = body.querySelector('#vimeo-player-container');
+        const existing = body.querySelector('#vimeo-iframe-container');
         if (!existing || body.dataset.loadedId !== videoId) {
           body.dataset.loadedId = videoId;
           body.innerHTML = `
-            <div id="vimeo-player-container" style="position: relative; background: #000;">
-              <div id="plyr-vimeo-player" data-plyr-provider="vimeo" data-plyr-embed-id="${videoId}"></div>
+            <div id="vimeo-iframe-container" class="video-wrapper" style="position: relative; background: #000;">
+              <iframe src="${srcUrl}" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen frameborder="0" style="position:absolute;top:0;left:0;width:100%;height:100%;"></iframe>
+              <div id="vimeo-loader-overlay" class="yt-loader-overlay">
+                <div class="loader" style="margin-bottom:1.5rem;"></div>
+                <div style="font-family:'Source Sans Pro', sans-serif; font-size:1.1rem; color:var(--its-maroon-dark); font-weight:600; letter-spacing:0.05em;">Wait! Live stream is loading......</div>
+              </div>
             </div>`;
           
           setTimeout(() => {
-            if (window.plyrInstance) window.plyrInstance.destroy();
-            window.plyrInstance = new Plyr('#plyr-vimeo-player', {
-              autoplay: true,
-              ratio: '16:9',
-              clickToPlay: false,
-              keyboard: { focused: false, global: false },
-              controls: ['mute', 'volume', 'settings', 'fullscreen']
-            });
-          }, 50);
+            const overlay = document.getElementById('vimeo-loader-overlay');
+            if (overlay) {
+              overlay.style.opacity = '0';
+              setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
+            }
+          }, 6000);
         }
       } else {
         body.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">Invalid Vimeo URL.</div>';
@@ -1540,7 +1536,7 @@ function extractYouTubeId(url) {
 }
 
 function extractVimeoId(url) {
-  const match = url.match(/(?:vimeo\.com\/|player\.vimeo\.com\/video\/)([0-9]+)/);
+  const match = url.match(/([0-9]{7,12})/);
   return match ? match[1] : null;
 }
 
