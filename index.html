@@ -1455,14 +1455,14 @@ function renderStreamViewerWith(s) {
               youtube: { rel: 0, iv_load_policy: 3, modestbranding: 1, controls: 0 }
             });
 
-            // Fade out the loading overlay after 7 seconds to hide YouTube branding during boot up
+            // Fade out the loading overlay after 9 seconds to hide YouTube branding during boot up
             setTimeout(() => {
               const overlay = document.getElementById('yt-loader-overlay');
               if (overlay) {
                 overlay.style.opacity = '0';
                 setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 500);
               }
-            }, 7000);
+            }, 9000);
           }, 50);
         }
       } else {
