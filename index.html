@@ -1393,20 +1393,16 @@ onAuthStateChanged(auth, async (user) => {
     
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
-    // Auto-checkin to Firebase (for both members and admins)
-    const tKey = todayKey();
-    const attRef = ref(db, `attendance/${tKey}/${id}`);
-    get(attRef).then(snap => {
-      if (!snap.exists()) {
-        set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) })
-          .catch(err => {
-            console.error("Attendance Write Error:", err);
-            showToast("Warning: Check-in failed (DB Rules?)");
-          });
-      }
-    }).catch(err => {
-      console.error("Attendance Read Error:", err);
-    });
+    if (!isAdmin) {
+      // Auto-checkin to Firebase (members only)
+      const tKey = todayKey();
+      const attRef = ref(db, `attendance/${tKey}/${id}`);
+      set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) })
+        .catch(err => {
+          console.error("Attendance Write Error:", err);
+          showToast("Check-in Error: " + err.message);
+        });
+    }
 
     if (isAdmin) {
       showPage('admin-page'); renderAdmin();
@@ -1731,6 +1727,9 @@ function renderAttendanceAdmin() {
     list.innerHTML = att.map(a =>
       `<div class="att-row"><span class="att-id">${a.id}</span><span class="att-time">${a.time}</span><span class="att-online"></span></div>`
     ).join('');
+  }, error => {
+    console.error("Admin Attendance Read Error:", error);
+    showToast("Admin Read Error: " + error.message);
   });
 }
 
