@@ -1282,11 +1282,9 @@ const DEFAULT_SCHEDULE = [
 const DEFAULT_STREAM_URL = 'https://www.youtube-nocookie.com/embed/WYFyh6fpYMQ';
 let currentUser = null;
 
-// ─── LOCAL ONLY (attendance + schedule stay on device) ───
+// ─── LOCAL ONLY (schedule stay on device) ───
 function getSchedule()       { const s=localStorage.getItem('ashara_schedule'); return s?JSON.parse(s):[...DEFAULT_SCHEDULE]; }
 function saveScheduleData(d) { localStorage.setItem('ashara_schedule',JSON.stringify(d)); }
-function getAttendance()     { const s=localStorage.getItem('ashara_attendance_'+todayKey()); return s?JSON.parse(s):[]; }
-function saveAttendance(a)   { localStorage.setItem('ashara_attendance_'+todayKey(),JSON.stringify(a)); }
 function todayKey()          { return new Date().toISOString().slice(0,10); }
 
 // ─── FIREBASE: MEMBERS ───
@@ -1332,6 +1330,7 @@ async function doLogin() {
   const email = (id.toLowerCase() === 'admin') ? 'admin@ashara.live' : `${id}@ashara.live`;
   
   try {
+    localStorage.setItem('loginTimestamp', Date.now().toString());
     await signInWithEmailAndPassword(auth, email, pass);
     // onAuthStateChanged will handle the UI redirect
   } catch(e) {
@@ -1345,6 +1344,7 @@ document.addEventListener('keydown', e => {
 });
 
 function doLogout() {
+  localStorage.removeItem('loginTimestamp');
   signOut(auth);
 }
 window.doLogout = doLogout;
@@ -1357,6 +1357,22 @@ function showPage(id) {
 // ─── FIREBASE AUTH LISTENER ───
 onAuthStateChanged(auth, async (user) => {
   if (user) {
+    const loginTime = localStorage.getItem('loginTimestamp');
+    const now = Date.now();
+    const elapsed = now - parseInt(loginTime || '0');
+    const fourHours = 4 * 60 * 60 * 1000;
+    
+    if (!loginTime || elapsed > fourHours) {
+      signOut(auth);
+      return;
+    }
+
+    if (window._logoutTimer) clearTimeout(window._logoutTimer);
+    window._logoutTimer = setTimeout(() => {
+      signOut(auth);
+      showToast('Session expired. Please log in again.');
+    }, fourHours - elapsed);
+
     const isAdmin = user.email === 'admin@ashara.live';
     const id = isAdmin ? 'admin' : user.email.split('@')[0];
     
@@ -1380,11 +1396,21 @@ onAuthStateChanged(auth, async (user) => {
       showPage('admin-page'); renderAdmin();
     } else {
       showPage('viewer-page'); renderViewer();
+      // Auto-checkin to Firebase
+      const tKey = todayKey();
+      const attRef = ref(db, `attendance/${tKey}/${id}`);
+      get(attRef).then(snap => {
+        if (!snap.exists()) {
+          set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) });
+        }
+      });
     }
   } else {
     // Logged Out State
+    if (window._logoutTimer) clearTimeout(window._logoutTimer);
     currentUser = null;
     if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
+    if (window._attUnsub) { window._attUnsub(); window._attUnsub = null; }
     if (window.plyrInstance) { window.plyrInstance.destroy(); window.plyrInstance = null; }
     const streamBody = document.getElementById('stream-body');
     if (streamBody) { streamBody.innerHTML = ''; streamBody.dataset.loadedId = ''; }
@@ -1582,26 +1608,7 @@ function extractVimeoId(url) {
   return match ? match[1] : null;
 }
 
-// ═══════════════════════════════════════════════════
-//  CHECK-IN
-// ═══════════════════════════════════════════════════
-function checkIfCheckedIn() {
-  const att = getAttendance();
-  const alreadyIn = att.find(a => a.id === currentUser.id);
-  const btn = document.getElementById('checkin-btn');
-  if (alreadyIn) { btn.disabled=true;  btn.textContent='✓ Checked In'; }
-  else           { btn.disabled=false; btn.textContent='Check In ✓';   }
-}
-window.checkIfCheckedIn = checkIfCheckedIn;
 
-function doCheckIn() {
-  const att = getAttendance();
-  att.push({ id: currentUser.id, time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) });
-  saveAttendance(att);
-  checkIfCheckedIn();
-  showToast('✓ Attendance marked - Thank you');
-}
-window.doCheckIn = doCheckIn;
 
 // ═══════════════════════════════════════════════════
 //  ADMIN
@@ -1611,7 +1618,6 @@ async function renderAdmin() {
   await renderMembersAdmin();
   renderScheduleAdmin();
   renderAttendanceAdmin();
-  setInterval(renderAttendanceAdmin, 15000);
 }
 
 function setPlatform(p) {
@@ -1703,22 +1709,27 @@ async function removeMember(id) {
 window.removeMember = removeMember;
 
 function renderAttendanceAdmin() {
-  const att  = getAttendance();
-  document.getElementById('att-count').textContent = att.length;
-  const list = document.getElementById('attendance-list');
-  if (att.length === 0) {
-    list.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.85rem;">No check-ins yet today.</div>';
-    return;
-  }
-  list.innerHTML = att.map(a =>
-    `<div class="att-row"><span class="att-id">${a.id}</span><span class="att-time">${a.time}</span><span class="att-online"></span></div>`
-  ).join('');
+  const tKey = todayKey();
+  if (window._attUnsub) window._attUnsub();
+  window._attUnsub = onValue(ref(db, `attendance/${tKey}`), snap => {
+    const data = snap.exists() ? snap.val() : {};
+    const att = Object.keys(data).map(k => ({ id: k, time: data[k].time }));
+    document.getElementById('att-count').textContent = att.length;
+    const list = document.getElementById('attendance-list');
+    if (att.length === 0) {
+      list.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.85rem;">No check-ins yet today.</div>';
+      return;
+    }
+    list.innerHTML = att.map(a =>
+      `<div class="att-row"><span class="att-id">${a.id}</span><span class="att-time">${a.time}</span><span class="att-online"></span></div>`
+    ).join('');
+  });
 }
 
 function resetAttendance() {
   if (!confirm("Reset today's attendance list?")) return;
-  localStorage.removeItem('ashara_attendance_' + todayKey());
-  renderAttendanceAdmin();
+  const tKey = todayKey();
+  set(ref(db, `attendance/${tKey}`), null);
   showToast('Attendance reset');
 }
 window.resetAttendance = resetAttendance;
