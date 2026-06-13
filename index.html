@@ -1270,9 +1270,10 @@
 
       <div class="members-list" id="members-list"></div>
 
-      <div class="add-member-row" style="margin-top:0.75rem;">
-        <input type="text" id="new-member-id" placeholder="Enter new ITS ID">
-        <button class="btn-add" onclick="addMember()">+ Add</button>
+      <div class="add-member-row" style="margin-top:0.75rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <input type="text" id="new-member-id" placeholder="Enter new ITS ID" style="flex:1; min-width:120px;" class="stream-url-input">
+        <input type="password" id="new-member-pass" placeholder="Enter Password" style="flex:1; min-width:120px;" class="stream-url-input">
+        <button class="btn-save" onclick="addMember()" style="margin:0;">+ Add</button>
       </div>
     </div>
 
@@ -1289,8 +1290,8 @@
 //  FIREBASE SETUP
 // ═══════════════════════════════════════════════════
 import { initializeApp }                         from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
-import { getDatabase, ref, set, get, onValue }   from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js';
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updateProfile } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
+import { getDatabase, ref, set, get, onValue, onDisconnect }   from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, setPersistence, browserSessionPersistence } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC2wJXEV6-szmr0kEaW0o_fei0zekEJnDc',
@@ -1385,9 +1386,12 @@ async function doLogin() {
   const email = (id.toLowerCase() === 'admin') ? 'admin@ashara.live' : `${id}@ashara.live`;
   
   try {
-    localStorage.setItem('loginTimestamp', Date.now().toString());
-    sessionStorage.setItem('sessionId', Math.random().toString(36).substring(2) + Date.now().toString(36));
+    await setPersistence(auth, browserSessionPersistence);
     await signInWithEmailAndPassword(auth, email, pass);
+    
+    const uid = (id.toLowerCase() === 'admin') ? 'admin' : id;
+    try { await set(ref(db, `login_timestamps/${uid}`), Date.now()); } catch(e) {}
+    
     // Keep loader visible — onAuthStateChanged will handle the UI redirect
     label.textContent = 'Logging in...';
   } catch(e) {
@@ -1409,7 +1413,6 @@ document.addEventListener('keydown', e => {
 
 function doLogout() {
   localStorage.removeItem('loginTimestamp');
-  sessionStorage.removeItem('sessionId');
   signOut(auth);
 }
 window.doLogout = doLogout;
@@ -1422,31 +1425,44 @@ function showPage(id) {
 // ─── FIREBASE AUTH LISTENER ───
 onAuthStateChanged(auth, async (user) => {
   if (user) {
-    const loginTime = localStorage.getItem('loginTimestamp');
-    const now = Date.now();
-    const elapsed = now - parseInt(loginTime || '0');
-    const fourHours = 4 * 60 * 60 * 1000;
-    
-    if (!loginTime || elapsed > fourHours) {
-      signOut(auth);
-      return;
+    let isAdmin = false;
+    try {
+      const tokenResult = await user.getIdTokenResult();
+      isAdmin = !!tokenResult.claims.admin || user.email === 'admin@ashara.live'; // Fallback for backward compatibility
+    } catch(e) {
+      isAdmin = user.email === 'admin@ashara.live';
     }
-
-    if (window._logoutTimer) clearTimeout(window._logoutTimer);
-    window._logoutTimer = setTimeout(() => {
-      signOut(auth);
-      showToast('Session expired. Please log in again.');
-    }, fourHours - elapsed);
-
-    const isAdmin = user.email === 'admin@ashara.live';
+    
     const id = isAdmin ? 'admin' : user.email.split('@')[0];
+
+    // Session Expiry Check via Database
+    try {
+      const tsSnap = await get(ref(db, `login_timestamps/${id}`));
+      const loginTime = tsSnap.exists() ? parseInt(tsSnap.val()) : 0;
+      const now = Date.now();
+      const elapsed = now - loginTime;
+      const fourHours = 4 * 60 * 60 * 1000;
+      
+      if (loginTime === 0 || elapsed > fourHours) {
+        signOut(auth);
+        return;
+      }
+      if (window._logoutTimer) clearTimeout(window._logoutTimer);
+      window._logoutTimer = setTimeout(() => {
+        signOut(auth);
+        showToast('Session expired. Please log in again.');
+      }, fourHours - elapsed);
+    } catch(e) {
+      // If DB read fails (e.g. strict rules), fallback to basic 4hr timeout
+      if (window._logoutTimer) clearTimeout(window._logoutTimer);
+      window._logoutTimer = setTimeout(() => { signOut(auth); }, 4 * 60 * 60 * 1000);
+    }
     
     // Safety check: Ensure standard members are still in the allowed DB list securely
     if (!isAdmin) {
       try {
         const snap = await get(ref(db, `members/${id}`));
         if (!snap.exists() || snap.val() !== true) {
-          // If legacy array or not found, revoke access
           signOut(auth); 
           return;
         }
@@ -1459,30 +1475,28 @@ onAuthStateChanged(auth, async (user) => {
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
     if (!isAdmin) {
-      // 1) Enforce single device using Firebase Auth Profile (bypasses DB rules)
-      let localSessionId = sessionStorage.getItem('sessionId');
-      if (!localSessionId) {
-        localSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-        sessionStorage.setItem('sessionId', localSessionId);
+      // 1) Enforce strict single-device sessions via Firebase Presence (onDisconnect)
+      const sessionToken = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const sessionRef = ref(db, `active_sessions/${id}`);
+      
+      try {
+        await onDisconnect(sessionRef).remove(); // Clear session when browser closes/disconnects
+        await set(sessionRef, sessionToken);     // Register this device's token
+        
+        if (window._sessionUnsub) window._sessionUnsub();
+        window._sessionUnsub = onValue(sessionRef, snap => {
+          const currentDbToken = snap.val();
+          // If token changes to something else, another device logged in
+          if (currentDbToken && currentDbToken !== sessionToken) {
+            showToast('Logged out: Account accessed from another device.');
+            signOut(auth);
+          }
+        });
+      } catch(e) {
+        console.error("Session tracking blocked by DB rules or offline", e);
       }
 
-      updateProfile(user, { displayName: localSessionId }).catch(e => console.error(e));
-
-      if (window._sessionPoller) clearInterval(window._sessionPoller);
-      window._sessionPoller = setInterval(async () => {
-        if (auth.currentUser) {
-          try {
-            await auth.currentUser.reload();
-            if (auth.currentUser.displayName && auth.currentUser.displayName !== sessionStorage.getItem('sessionId')) {
-              clearInterval(window._sessionPoller);
-              showToast('Logged out: Account accessed from another device.');
-              signOut(auth);
-            }
-          } catch(e) {}
-        }
-      }, 5000);
-
-      // 2) Auto-checkin to Firebase (members only)
+      // 2) Auto-checkin to Firebase
       const tKey = todayKey();
       const attRef = ref(db, `attendance/${tKey}/${id}`);
       set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) })
@@ -1499,10 +1513,10 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     // Logged Out State
     if (window._logoutTimer) clearTimeout(window._logoutTimer);
-    if (window._sessionPoller) { clearInterval(window._sessionPoller); window._sessionPoller = null; }
     currentUser = null;
     if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
     if (window._attUnsub) { window._attUnsub(); window._attUnsub = null; }
+    if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
     if (window.plyrInstance) { window.plyrInstance.destroy(); window.plyrInstance = null; }
     const streamBody = document.getElementById('stream-body');
     if (streamBody) { streamBody.innerHTML = ''; streamBody.dataset.loadedId = ''; }
@@ -1769,24 +1783,32 @@ async function renderMembersAdmin() {
 }
 
 async function addMember() {
-  const input   = document.getElementById('new-member-id');
-  const id      = input.value.trim();
-  if (!id) return;
+  const idInput   = document.getElementById('new-member-id');
+  const passInput = document.getElementById('new-member-pass');
+  const id        = idInput.value.trim();
+  const pass      = passInput.value.trim();
+  
+  if (!id || !pass) { showToast('Please enter both ID and Password'); return; }
+  if (pass.length < 6) { showToast('Password must be at least 6 characters'); return; }
+  
   const members = await getMembers();
   if (members.includes(id)) { showToast('ID already exists'); return; }
   
   try {
-    // Securely register the new user in Firebase Auth so they can login.
-    // Using adminAuth ensures the current admin does not get logged out!
-    await createUserWithEmailAndPassword(adminAuth, `${id}@ashara.live`, id);
+    // Securely register the new user in Firebase Auth with the explicit password
+    await createUserWithEmailAndPassword(adminAuth, `${id}@ashara.live`, pass);
   } catch (e) {
-    // If account already exists in Auth, that's fine, we still add them back to the list
     console.log('Firebase Auth:', e.message);
+    if (e.code !== 'auth/email-already-in-use') {
+      showToast('Error creating user: ' + e.message);
+      return;
+    }
   }
 
   members.push(id);
   await saveMembers(members);
-  input.value = '';
+  idInput.value = '';
+  passInput.value = '';
   await renderMembersAdmin();
   showToast('Member added: ' + id);
 }
