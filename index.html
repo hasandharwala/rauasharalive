@@ -1385,12 +1385,9 @@ async function doLogin() {
   const email = (id.toLowerCase() === 'admin') ? 'admin@ashara.live' : `${id}@ashara.live`;
   
   try {
-    // Mark this as a brand-new login (not a page-reload resume)
-    window._freshLogin = true;
-    // Generate a unique session token for this device
-    const sessionToken = (crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).substr(2,9) + Date.now().toString(36)));
-    localStorage.setItem('sessionToken', sessionToken);
     localStorage.setItem('loginTimestamp', Date.now().toString());
+    localStorage.setItem('sessionId', Math.random().toString(36).substring(2) + Date.now().toString(36));
+    localStorage.setItem('justLoggedIn', 'true');
     await signInWithEmailAndPassword(auth, email, pass);
     // Keep loader visible — onAuthStateChanged will handle the UI redirect
     label.textContent = 'Logging in...';
@@ -1413,8 +1410,7 @@ document.addEventListener('keydown', e => {
 
 function doLogout() {
   localStorage.removeItem('loginTimestamp');
-  localStorage.removeItem('sessionToken');
-  if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
+  localStorage.removeItem('sessionId');
   signOut(auth);
 }
 window.doLogout = doLogout;
@@ -1463,44 +1459,31 @@ onAuthStateChanged(auth, async (user) => {
     
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
-    if (!isAdmin) {
-      // ─── SINGLE-DEVICE SESSION ENFORCEMENT ───
-      const sessionToken = localStorage.getItem('sessionToken');
+    // --- Single Device Session Check ---
+    let localSessionId = localStorage.getItem('sessionId');
+    const justLoggedIn = localStorage.getItem('justLoggedIn') === 'true';
+    localStorage.removeItem('justLoggedIn');
 
-      if (window._freshLogin) {
-        // → Fresh login: write our token to Firebase, kicking out any other active device
-        window._freshLogin = false;
-        if (sessionToken) {
-          try {
-            await set(ref(db, `sessions/${id}`), sessionToken);
-          } catch(e) {
-            console.error('Session write failed:', e);
-          }
-        }
-      } else {
-        // → Page reload (persisted auth): do NOT overwrite — just check if someone else took our slot
-        const snap = await get(ref(db, `sessions/${id}`));
-        if (snap.exists() && sessionToken && snap.val() !== sessionToken) {
-          // Another device has logged in since our last load — sign out
-          localStorage.removeItem('sessionToken');
-          signOut(auth);
-          showToast('⚠️ Signed out — your account is active on another device.');
-          return;
-        }
+    if (justLoggedIn && localSessionId) {
+      try { await set(ref(db, `sessions/${id}`), localSessionId); } catch(e) {}
+    } else if (!localSessionId) {
+      localSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem('sessionId', localSessionId);
+      try { await set(ref(db, `sessions/${id}`), localSessionId); } catch(e) {}
+    }
+
+    if (window._sessionUnsub) window._sessionUnsub();
+    window._sessionUnsub = onValue(ref(db, `sessions/${id}`), snap => {
+      const dbSessionId = snap.val();
+      const currentLocalSessionId = localStorage.getItem('sessionId');
+      if (dbSessionId && dbSessionId !== currentLocalSessionId) {
+        showToast('Logged out: Account accessed from another device.');
+        signOut(auth);
       }
-
-      // Watch for another device overwriting our token in real-time
-      if (window._sessionUnsub) window._sessionUnsub();
-      window._sessionUnsub = onValue(ref(db, `sessions/${id}`), snap => {
-        const myToken = localStorage.getItem('sessionToken');
-        if (snap.exists() && myToken && snap.val() !== myToken) {
-          // Another device just logged in — sign out this device
-          localStorage.removeItem('sessionToken');
-          signOut(auth);
-          showToast('⚠️ Signed out — your account was opened on another device.');
-        }
-      });
-
+    });
+    // -----------------------------------
+    
+    if (!isAdmin) {
       // Auto-checkin to Firebase (members only)
       const tKey = todayKey();
       const attRef = ref(db, `attendance/${tKey}/${id}`);
@@ -1519,10 +1502,10 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     // Logged Out State
     if (window._logoutTimer) clearTimeout(window._logoutTimer);
-    if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
     currentUser = null;
     if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
     if (window._attUnsub) { window._attUnsub(); window._attUnsub = null; }
+    if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
     if (window.plyrInstance) { window.plyrInstance.destroy(); window.plyrInstance = null; }
     const streamBody = document.getElementById('stream-body');
     if (streamBody) { streamBody.innerHTML = ''; streamBody.dataset.loadedId = ''; }
