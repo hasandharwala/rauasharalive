@@ -1290,7 +1290,7 @@
 // ═══════════════════════════════════════════════════
 import { initializeApp }                         from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import { getDatabase, ref, set, get, onValue }   from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-database.js';
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, updateProfile } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
 
 const firebaseConfig = {
   apiKey: 'AIzaSyC2wJXEV6-szmr0kEaW0o_fei0zekEJnDc',
@@ -1386,7 +1386,7 @@ async function doLogin() {
   
   try {
     localStorage.setItem('loginTimestamp', Date.now().toString());
-    localStorage.setItem('sessionId', Math.random().toString(36).substring(2) + Date.now().toString(36));
+    sessionStorage.setItem('sessionId', Math.random().toString(36).substring(2) + Date.now().toString(36));
     await signInWithEmailAndPassword(auth, email, pass);
     // Keep loader visible — onAuthStateChanged will handle the UI redirect
     label.textContent = 'Logging in...';
@@ -1409,7 +1409,7 @@ document.addEventListener('keydown', e => {
 
 function doLogout() {
   localStorage.removeItem('loginTimestamp');
-  localStorage.removeItem('sessionId');
+  sessionStorage.removeItem('sessionId');
   signOut(auth);
 }
 window.doLogout = doLogout;
@@ -1459,32 +1459,36 @@ onAuthStateChanged(auth, async (user) => {
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
     if (!isAdmin) {
-      // Auto-checkin to Firebase and enforce single device session
-      let localSessionId = localStorage.getItem('sessionId');
+      // 1) Enforce single device using Firebase Auth Profile (bypasses DB rules)
+      let localSessionId = sessionStorage.getItem('sessionId');
       if (!localSessionId) {
         localSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-        localStorage.setItem('sessionId', localSessionId);
+        sessionStorage.setItem('sessionId', localSessionId);
       }
 
+      updateProfile(user, { displayName: localSessionId }).catch(e => console.error(e));
+
+      if (window._sessionPoller) clearInterval(window._sessionPoller);
+      window._sessionPoller = setInterval(async () => {
+        if (auth.currentUser) {
+          try {
+            await auth.currentUser.reload();
+            if (auth.currentUser.displayName && auth.currentUser.displayName !== sessionStorage.getItem('sessionId')) {
+              clearInterval(window._sessionPoller);
+              showToast('Logged out: Account accessed from another device.');
+              signOut(auth);
+            }
+          } catch(e) {}
+        }
+      }, 5000);
+
+      // 2) Auto-checkin to Firebase (members only)
       const tKey = todayKey();
       const attRef = ref(db, `attendance/${tKey}/${id}`);
-      
-      set(attRef, { 
-        time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}),
-        sessionId: localSessionId
-      }).catch(err => {
-        console.error("Attendance Write Error:", err);
-      });
-
-      if (window._sessionUnsub) window._sessionUnsub();
-      window._sessionUnsub = onValue(ref(db, `attendance/${tKey}/${id}/sessionId`), snap => {
-        const dbSessionId = snap.val();
-        const currentLocalSessionId = localStorage.getItem('sessionId');
-        if (dbSessionId && dbSessionId !== currentLocalSessionId) {
-          showToast('Logged out: Account accessed from another device.');
-          signOut(auth);
-        }
-      });
+      set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) })
+        .catch(err => {
+          console.error("Attendance Write Error:", err);
+        });
     }
 
     if (isAdmin) {
@@ -1495,10 +1499,10 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     // Logged Out State
     if (window._logoutTimer) clearTimeout(window._logoutTimer);
+    if (window._sessionPoller) { clearInterval(window._sessionPoller); window._sessionPoller = null; }
     currentUser = null;
     if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
     if (window._attUnsub) { window._attUnsub(); window._attUnsub = null; }
-    if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
     if (window.plyrInstance) { window.plyrInstance.destroy(); window.plyrInstance = null; }
     const streamBody = document.getElementById('stream-body');
     if (streamBody) { streamBody.innerHTML = ''; streamBody.dataset.loadedId = ''; }
