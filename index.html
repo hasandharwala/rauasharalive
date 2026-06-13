@@ -955,6 +955,70 @@
 
   .toast.show { transform: translateX(-50%) translateY(0); }
 
+  /* ─── KICK MODAL ─── */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .modal-overlay.active {
+    display: flex;
+    opacity: 1;
+  }
+  .modal-content {
+    background: var(--bg-white);
+    border-radius: var(--card-radius);
+    padding: 2.5rem 2rem;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    transform: translateY(20px);
+    transition: transform 0.3s ease;
+  }
+  .modal-overlay.active .modal-content {
+    transform: translateY(0);
+  }
+  .modal-icon {
+    font-size: 3.5rem;
+    margin-bottom: 1rem;
+    line-height: 1;
+  }
+  .modal-title {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #ef4444;
+    margin-bottom: 0.8rem;
+  }
+  .modal-desc {
+    font-size: 1rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-bottom: 1.8rem;
+  }
+  .btn-modal {
+    background: #ef4444;
+    border: none;
+    border-radius: 8px;
+    padding: 0.8rem 2rem;
+    color: #fff;
+    font-size: 1.05rem;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: var(--transition);
+  }
+  .btn-modal:hover { background: #dc2626; }
+
   /* ─── MISC ─── */
   .success-msg {
     background: #f0fdf4;
@@ -1285,6 +1349,16 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<!-- KICKED OUT MODAL -->
+<div class="modal-overlay" id="kick-modal">
+  <div class="modal-content">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">Session Terminated</div>
+    <div class="modal-desc">Your account was accessed from another device. For security reasons, you have been logged out of this session.</div>
+    <button class="btn-modal" onclick="document.getElementById('kick-modal').classList.remove('active')">Acknowledge</button>
+  </div>
+</div>
+
 <script type="module">
 // ═══════════════════════════════════════════════════
 //  FIREBASE SETUP
@@ -1488,7 +1562,7 @@ onAuthStateChanged(auth, async (user) => {
           const currentDbToken = snap.val();
           // If token changes to something else, another device logged in
           if (currentDbToken && currentDbToken !== sessionToken) {
-            showToast('Logged out: Account accessed from another device.');
+            document.getElementById('kick-modal').classList.add('active');
             signOut(auth);
           }
         });
@@ -1528,6 +1602,15 @@ onAuthStateChanged(auth, async (user) => {
     if (passInput) passInput.value = '';
     const err = document.getElementById('login-error');
     if (err) err.style.display = 'none';
+    
+    // Reset login button state
+    const btn = document.getElementById('login-btn');
+    if (btn) {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+      const label = btn.querySelector('.btn-login-label');
+      if (label) label.textContent = 'Login';
+    }
   }
 });
 
