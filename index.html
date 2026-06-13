@@ -169,15 +169,44 @@
     margin-top: 1rem;
     transition: var(--transition);
     box-shadow: 0 4px 12px rgba(173, 142, 107, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    position: relative;
   }
 
-  .btn-login:hover {
+  .btn-login:hover:not(:disabled) {
     background: var(--its-maroon);
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(155, 91, 85, 0.4);
   }
   
-  .btn-login:active { transform: translateY(0); }
+  .btn-login:active:not(:disabled) { transform: translateY(0); }
+
+  .btn-login:disabled {
+    opacity: 0.8;
+    cursor: not-allowed;
+  }
+
+  /* Login button spinner */
+  .btn-login-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2.5px solid rgba(255,255,255,0.35);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: loginSpin 0.7s linear infinite;
+    display: none;
+    flex-shrink: 0;
+  }
+
+  .btn-login.loading .btn-login-spinner { display: block; }
+  .btn-login.loading .btn-login-label { opacity: 0.85; }
+
+  @keyframes loginSpin {
+    to { transform: rotate(360deg); }
+  }
 
   .error-msg {
     background: #fef2f2;
@@ -189,6 +218,15 @@
     margin-top: 1.5rem;
     display: none;
     text-align: center;
+    animation: shakeError 0.4s ease;
+  }
+
+  @keyframes shakeError {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-6px); }
+    40% { transform: translateX(6px); }
+    60% { transform: translateX(-4px); }
+    80% { transform: translateX(4px); }
   }
 
   .divider-gold {
@@ -1101,18 +1139,21 @@
       <h2>Login with your ITS ID and Password</h2>
 
       <div class="form-group">
-        <label>ITS ID / Username</label>
+        <label>ITS ID</label>
         <input type="text" id="login-id" placeholder="e.g. 60472330" autocomplete="off">
       </div>
 
       <div class="form-group">
-        <label>Password / PIN</label>
+        <label>Password</label>
         <input type="password" id="login-pass" placeholder="••••••••">
       </div>
 
-      <button class="btn-login" onclick="doLogin()">Login</button>
+      <button class="btn-login" id="login-btn" onclick="doLogin()">
+        <span class="btn-login-label">Login</span>
+        <span class="btn-login-spinner"></span>
+      </button>
 
-      <div class="error-msg" id="login-error">Access not permitted. Please contact admin.</div>
+      <div class="error-msg" id="login-error">❌ Incorrect ID or Password. Please try again.</div>
 
 
     </div>
@@ -1323,17 +1364,41 @@ async function doLogin() {
   const id   = document.getElementById('login-id').value.trim();
   const pass = document.getElementById('login-pass').value.trim();
   const err  = document.getElementById('login-error');
+  const btn  = document.getElementById('login-btn');
   err.style.display = 'none';
   
-  if (!id || !pass) { err.style.display = 'block'; return; }
+  if (!id || !pass) {
+    err.style.display = 'none';
+    err.style.display = 'block'; // re-trigger animation
+    void err.offsetWidth;
+    err.style.display = 'block';
+    return;
+  }
   
+  // Show loading state
+  btn.classList.add('loading');
+  btn.disabled = true;
+  const label = btn.querySelector('.btn-login-label');
+  label.textContent = 'Verifying...';
+
   const email = (id.toLowerCase() === 'admin') ? 'admin@ashara.live' : `${id}@ashara.live`;
   
   try {
+    // Generate a unique session token for this device
+    const sessionToken = (crypto.randomUUID ? crypto.randomUUID() : (Math.random().toString(36).substr(2,9) + Date.now().toString(36)));
+    localStorage.setItem('sessionToken', sessionToken);
     localStorage.setItem('loginTimestamp', Date.now().toString());
     await signInWithEmailAndPassword(auth, email, pass);
-    // onAuthStateChanged will handle the UI redirect
+    // Keep loader visible — onAuthStateChanged will handle the UI redirect
+    label.textContent = 'Logging in...';
   } catch(e) {
+    // Reset button
+    btn.classList.remove('loading');
+    btn.disabled = false;
+    label.textContent = 'Login';
+    // Show shake-animated error
+    err.style.display = 'none';
+    void err.offsetWidth; // reflow to restart animation
     err.style.display = 'block';
   }
 }
@@ -1345,6 +1410,8 @@ document.addEventListener('keydown', e => {
 
 function doLogout() {
   localStorage.removeItem('loginTimestamp');
+  localStorage.removeItem('sessionToken');
+  if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
   signOut(auth);
 }
 window.doLogout = doLogout;
@@ -1394,6 +1461,24 @@ onAuthStateChanged(auth, async (user) => {
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
     if (!isAdmin) {
+      // ─── SINGLE-DEVICE SESSION ENFORCEMENT ───
+      const sessionToken = localStorage.getItem('sessionToken');
+      if (sessionToken) {
+        // Write this device's token to Firebase — kicks out any existing session
+        try { await set(ref(db, `sessions/${id}`), sessionToken); } catch(e) {}
+
+        // Watch for another device overwriting our token
+        if (window._sessionUnsub) window._sessionUnsub();
+        window._sessionUnsub = onValue(ref(db, `sessions/${id}`), snap => {
+          if (snap.exists() && snap.val() !== sessionToken) {
+            // Another device logged in — sign out this one
+            localStorage.removeItem('sessionToken');
+            signOut(auth);
+            showToast('⚠️ Signed out — your account was opened on another device.');
+          }
+        });
+      }
+
       // Auto-checkin to Firebase (members only)
       const tKey = todayKey();
       const attRef = ref(db, `attendance/${tKey}/${id}`);
@@ -1412,6 +1497,7 @@ onAuthStateChanged(auth, async (user) => {
   } else {
     // Logged Out State
     if (window._logoutTimer) clearTimeout(window._logoutTimer);
+    if (window._sessionUnsub) { window._sessionUnsub(); window._sessionUnsub = null; }
     currentUser = null;
     if (window._streamUnsub) { window._streamUnsub(); window._streamUnsub = null; }
     if (window._attUnsub) { window._attUnsub(); window._attUnsub = null; }
