@@ -1387,7 +1387,6 @@ async function doLogin() {
   try {
     localStorage.setItem('loginTimestamp', Date.now().toString());
     localStorage.setItem('sessionId', Math.random().toString(36).substring(2) + Date.now().toString(36));
-    localStorage.setItem('justLoggedIn', 'true');
     await signInWithEmailAndPassword(auth, email, pass);
     // Keep loader visible — onAuthStateChanged will handle the UI redirect
     label.textContent = 'Logging in...';
@@ -1459,39 +1458,33 @@ onAuthStateChanged(auth, async (user) => {
     
     currentUser = { role: isAdmin ? 'admin' : 'member', id };
     
-    // --- Single Device Session Check ---
-    let localSessionId = localStorage.getItem('sessionId');
-    const justLoggedIn = localStorage.getItem('justLoggedIn') === 'true';
-    localStorage.removeItem('justLoggedIn');
-
-    if (justLoggedIn && localSessionId) {
-      try { await set(ref(db, `sessions/${id}`), localSessionId); } catch(e) {}
-    } else if (!localSessionId) {
-      localSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      localStorage.setItem('sessionId', localSessionId);
-      try { await set(ref(db, `sessions/${id}`), localSessionId); } catch(e) {}
-    }
-
-    if (window._sessionUnsub) window._sessionUnsub();
-    window._sessionUnsub = onValue(ref(db, `sessions/${id}`), snap => {
-      const dbSessionId = snap.val();
-      const currentLocalSessionId = localStorage.getItem('sessionId');
-      if (dbSessionId && dbSessionId !== currentLocalSessionId) {
-        showToast('Logged out: Account accessed from another device.');
-        signOut(auth);
-      }
-    });
-    // -----------------------------------
-    
     if (!isAdmin) {
-      // Auto-checkin to Firebase (members only)
+      // Auto-checkin to Firebase and enforce single device session
+      let localSessionId = localStorage.getItem('sessionId');
+      if (!localSessionId) {
+        localSessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        localStorage.setItem('sessionId', localSessionId);
+      }
+
       const tKey = todayKey();
       const attRef = ref(db, `attendance/${tKey}/${id}`);
-      set(attRef, { time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) })
-        .catch(err => {
-          console.error("Attendance Write Error:", err);
-          showToast("Check-in Error: " + err.message);
-        });
+      
+      set(attRef, { 
+        time: new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}),
+        sessionId: localSessionId
+      }).catch(err => {
+        console.error("Attendance Write Error:", err);
+      });
+
+      if (window._sessionUnsub) window._sessionUnsub();
+      window._sessionUnsub = onValue(ref(db, `attendance/${tKey}/${id}/sessionId`), snap => {
+        const dbSessionId = snap.val();
+        const currentLocalSessionId = localStorage.getItem('sessionId');
+        if (dbSessionId && dbSessionId !== currentLocalSessionId) {
+          showToast('Logged out: Account accessed from another device.');
+          signOut(auth);
+        }
+      });
     }
 
     if (isAdmin) {
